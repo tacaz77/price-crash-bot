@@ -4,8 +4,8 @@ import time
 from threading import Thread
 
 # --- НАСТРОЙКИ ---
-TOKEN = 'ТВОЙ_ТОКЕН_БОТА'
-CHANNEL_ID = '@ТВОЙ_КАНАЛ' 
+TOKEN = '8224578094:AAEOwXsE2aJly_LoMbS-5ud6FgT-O2rh3r8'
+CHANNEL_ID = '@pricecrashpro_bot' 
 ADMIN_ID = 123456789 # Твой ID (можно узнать у @userinfobot), чтобы бот тебя слушал
 # -----------------
 
