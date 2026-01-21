@@ -5,7 +5,7 @@ from threading import Thread
 from flask import Flask
 
 # --- НАСТРОЙКИ ---
-TOKEN = '8224578094:AAEOwXsE2aJly_LoMbS-5ud6FgT-O2rh3r8' 
+TOKEN = '8224578094:AAFIBV1vuklglqtiMkT_HktFZxvlWZKy7Z4' 
 CHANNEL_ID = '@pricecrashpro'
 # -----------------
 
