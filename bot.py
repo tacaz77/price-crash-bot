@@ -38,7 +38,7 @@ def get_wb_errors():
         if res.status_code == 200:
             products = res.json().get('data', {}).get('products', [])
             for item in products:
-                if item.get('sale', 0) >= 90: # Скидка от 90%
+                if item.get('sale', 0) >= 90:
                     return {
                         'id': f"wb_{item['id']}",
                         'title': f"WB: {item['brand']} {item['name']}",
@@ -52,8 +52,7 @@ def get_wb_errors():
 # --- 3. ALIEXPRESS (ТОВАРЫ ЗА ЦЕНТЫ) ---
 def get_ali_deals():
     try:
-        # Используем CheapShark как временный фильтр для Ali/Global или их открытые фиды
-        url = "https://www.cheapshark.com/api/1.0/deals?upperPrice=0.10" # Ищем товары до 10 центов
+        url = "https://www.cheapshark.com/api/1.0/deals?upperPrice=0.10"
         res = requests.get(url, timeout=10)
         if res.status_code == 200:
             item = res.json()[0]
@@ -67,11 +66,9 @@ def get_ali_deals():
             }
     except: return None
 
-# --- 4. М.ВИДЕО (АКЦИИ И СЛИВЫ) ---
+# --- 4. М.ВИДЕО (ЭМУЛЯЦИЯ) ---
 def get_mvideo_deals():
     try:
-        # Эмуляция поиска по разделу распродаж М.Видео
-        # В реальном API Admitad это был бы запрос к Coupons
         return {
             'id': 'mvideo_promo_1',
             'title': "М.ВИДЕО: Ночная распродажа техники!",
@@ -82,7 +79,7 @@ def get_mvideo_deals():
         }
     except: return None
 
-# --- ОТПРАВКА ---
+# --- ОТПРАВКА В КАНАЛ ---
 def send_post(title, old_price, new_price, link, image, platform):
     caption = (
         f"🚨 **ЦЕНА РУХНУЛА!**\n\n"
@@ -97,10 +94,27 @@ def send_post(title, old_price, new_price, link, image, platform):
     try: bot.send_photo(CHANNEL_ID, image, caption=caption, reply_markup=markup, parse_mode="Markdown")
     except: pass
 
-# --- МОНИТОРИНГ ---
+# --- ОБРАБОТКА КОМАНД В ЛС ---
+@bot.message_handler(commands=['start'])
+def start_command(message):
+    print(f"DEBUG: Получена команда /start от {message.chat.id}")
+    markup = telebot.types.InlineKeyboardMarkup()
+    channel_url = f"https://t.me/{CHANNEL_ID.replace('@', '')}"
+    markup.add(telebot.types.InlineKeyboardButton("Перейти в канал", url=channel_url))
+    
+    bot.reply_to(message, 
+        f"Привет! Я бот проекта «Цена - Копейка».\n\n"
+        f"Я ищу ошибки цен и раздачи 24/7. Чтобы ничего не пропустить, подпишись на наш канал!", 
+        reply_markup=markup)
+
+@bot.message_handler(func=lambda message: True)
+def echo_all(message):
+    bot.reply_to(message, "Я работаю автоматически. Все актуальные скидки публикуются в канале!")
+
+# --- ЦИКЛ МОНИТОРИНГА ---
 def monitor():
+    print("Мониторинг запущен...")
     while True:
-        # Проверка всех модулей по очереди
         sources = [
             (get_games(), "Раздача"),
             (get_wb_errors(), "Wildberries"),
@@ -111,7 +125,6 @@ def monitor():
         for deal, platform in sources:
             if deal and deal.get('id') not in posted_ids:
                 posted_ids.add(deal.get('id'))
-                # Унификация полей для разных API
                 t = deal.get('title')
                 o = deal.get('old', deal.get('worth', '???'))
                 n = deal.get('new', 'БЕСПЛАТНО')
@@ -119,11 +132,16 @@ def monitor():
                 i = deal.get('img', deal.get('image', deal.get('thumb')))
                 
                 send_post(t, o, n, l, i, platform)
-                time.sleep(5) # Пауза между постами
+                time.sleep(5)
 
-        time.sleep(1800) # Проверка каждые 30 минут
+        time.sleep(1800)
 
+# --- ЗАПУСК ---
 if __name__ == "__main__":
+    # 1. Запуск Flask для Render
     Thread(target=run_web_server).start()
+    # 2. Запуск мониторинга в фоне
     Thread(target=monitor).start()
-    bot.infinity_polling()
+    # 3. Основной поток: прослушка ЛС
+    print("Бот ожидает сообщений (Polling)...")
+    bot.infinity_polling(timeout=20, long_polling_timeout=10)
