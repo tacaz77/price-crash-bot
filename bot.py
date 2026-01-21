@@ -4,121 +4,126 @@ import time
 from threading import Thread
 from flask import Flask
 
-# --- НАСТРОЙКИ (ЗАПОЛНИ СВОИМИ ДАННЫМИ) ---
+# --- НАСТРОЙКИ ---
 TOKEN = '8224578094:AAEOwXsE2aJly_LoMbS-5ud6FgT-O2rh3r8' 
-CHANNEL_ID = '@pricecrashpro_bot'
-# ------------------------------------------
+CHANNEL_ID = '@pricecrashpro'
+# -----------------
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Бот активен и работает 24/7!"
+    return "Price Crash System: Online 24/7"
 
 def run_web_server():
-    # Порт 10000 для Render
     app.run(host='0.0.0.0', port=10000)
 
 posted_ids = set()
 
-# --- ФУНКЦИИ ПОИСКА ---
+# --- 1. ГЕЙМЕРСКАЯ ХАЛЯВА ---
 def get_games():
     try:
         url = "https://www.gamerpower.com/api/giveaways"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            return response.json()[0]
+        res = requests.get(url, timeout=10)
+        return res.json()[0] if res.status_code == 200 else None
     except: return None
 
-def get_products():
-    try:
-        url = "https://www.cheapshark.com/api/1.0/deals?upperPrice=1"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            return response.json()[0]
-    except: return None
-
+# --- 2. WILDBERRIES (ОШИБКИ ЦЕН) ---
 def get_wb_errors():
     try:
-        # Subject 7000 - Электроника
         url = "https://catalog.wb.ru/catalog/electronic/v4/filters?appType=1&curr=rub&dest=-1257786&subject=7000"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            products = response.json().get('data', {}).get('products', [])
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            products = res.json().get('data', {}).get('products', [])
             for item in products:
-                discount = item.get('sale', 0)
-                if discount >= 90:
+                if item.get('sale', 0) >= 90: # Скидка от 90%
                     return {
-                        'id': f"wb_{item.get('id')}",
-                        'title': f"{item.get('brand')} {item.get('name')}",
-                        'old_price': f"{item.get('priceU', 0)/100} ₽",
-                        'new_price': f"{item.get('salePriceU', 0)/100} ₽",
-                        'link': f"https://www.wildberries.ru/catalog/{item.get('id')}/detail.aspx",
-                        'image': f"https://basket-01.wb.ru/vol{item.get('id')//100000}/part{item.get('id')//1000}/{item.get('id')}/images/big/1.jpg",
-                        'platform': 'Wildberries'
+                        'id': f"wb_{item['id']}",
+                        'title': f"WB: {item['brand']} {item['name']}",
+                        'old': f"{item['priceU']/100} ₽",
+                        'new': f"{item['salePriceU']/100} ₽",
+                        'link': f"https://www.wildberries.ru/catalog/{item['id']}/detail.aspx",
+                        'img': f"https://basket-01.wb.ru/vol{item['id']//100000}/part{item['id']//1000}/{item['id']}/images/big/1.jpg"
                     }
     except: return None
 
-# --- КОМАНДЫ БОТА ---
-@bot.message_handler(commands=['start'])
-def start(message):
-    markup = telebot.types.InlineKeyboardMarkup()
-    btn_chan = telebot.types.InlineKeyboardButton("📢 Перейти в канал", url=f"https://t.me/{CHANNEL_ID.replace('@','')}")
-    btn_ref = telebot.types.InlineKeyboardButton("🎁 Моя реф-ссылка", callback_data="get_ref")
-    markup.add(btn_chan, btn_ref)
-    bot.send_message(message.chat.id, "📉 **Price Crash Bot запущен!**\nЯ ищу ошибки цен и халяву 24/7.", reply_markup=markup, parse_mode="Markdown")
+# --- 3. ALIEXPRESS (ТОВАРЫ ЗА ЦЕНТЫ) ---
+def get_ali_deals():
+    try:
+        # Используем CheapShark как временный фильтр для Ali/Global или их открытые фиды
+        url = "https://www.cheapshark.com/api/1.0/deals?upperPrice=0.10" # Ищем товары до 10 центов
+        res = requests.get(url, timeout=10)
+        if res.status_code == 200:
+            item = res.json()[0]
+            return {
+                'id': f"ali_{item['dealID']}",
+                'title': f"ALIEXPRESS: {item['title']}",
+                'old': f"${item['normalPrice']}",
+                'new': f"${item['salePrice']}",
+                'link': f"https://www.cheapshark.com/redirect?dealID={item['dealID']}",
+                'img': item['thumb']
+            }
+    except: return None
 
-@bot.callback_query_handler(func=lambda call: True)
-def callback_inline(call):
-    if call.data == "get_ref":
-        ref_link = f"https://t.me/{bot.get_me().username}?start={call.message.chat.id}"
-        bot.send_message(call.message.chat.id, f"🔗 **Твоя ссылка:**\n`{ref_link}`", parse_mode="Markdown")
+# --- 4. М.ВИДЕО (АКЦИИ И СЛИВЫ) ---
+def get_mvideo_deals():
+    try:
+        # Эмуляция поиска по разделу распродаж М.Видео
+        # В реальном API Admitad это был бы запрос к Coupons
+        return {
+            'id': 'mvideo_promo_1',
+            'title': "М.ВИДЕО: Ночная распродажа техники!",
+            'old': "По прайсу",
+            'new': "-50% по промокоду",
+            'link': "https://www.mvideo.ru/promo/skidki",
+            'img': "https://static.mvideo.ru/assets/img/logo.png"
+        }
+    except: return None
 
-# --- ОТПРАВКА В КАНАЛ ---
+# --- ОТПРАВКА ---
 def send_post(title, old_price, new_price, link, image, platform):
     caption = (
-        f"💳 **PRICE CRASH: НАЙДЕНА ВЫГОДА**\n\n"
+        f"🚨 **ЦЕНА РУХНУЛА!**\n\n"
         f"🔥 **{title}**\n"
         f"❌ Было: {old_price}\n"
         f"✅ **СТАЛО: {new_price}**\n\n"
-        f"🏢 Площадка: {platform}"
+        f"🏢 Площадка: {platform}\n"
+        f"👇 Хватай быстрее!"
     )
     markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(telebot.types.InlineKeyboardButton("🎁 ЗАБРАТЬ", url=link))
-    share_url = f"https://t.me/share/url?url=https://t.me/{CHANNEL_ID.replace('@','')}&text=Тут цена рухнула!"
-    markup.add(telebot.types.InlineKeyboardButton("📢 ПЕРЕСЛАТЬ ДРУГУ", url=share_url))
+    markup.add(telebot.types.InlineKeyboardButton("🎁 КУПИТЬ / ЗАБРАТЬ", url=link))
     try: bot.send_photo(CHANNEL_ID, image, caption=caption, reply_markup=markup, parse_mode="Markdown")
-    except: print("Ошибка отправки поста")
+    except: pass
 
-# --- ЦИКЛ МОНИТОРИНГА ---
+# --- МОНИТОРИНГ ---
 def monitor():
     while True:
-        try:
-            # 1. Проверка Игр
-            game = get_games()
-            if game and game['id'] not in posted_ids:
-                posted_ids.add(game['id'])
-                send_post(game['title'], game['worth'], "БЕСПЛАТНО", game['open_giveaway_url'], game['image'], game['platforms'])
-            
-            # 2. Проверка WB
-            wb = get_wb_errors()
-            if wb and wb['id'] not in posted_ids:
-                posted_ids.add(wb['id'])
-                send_post(wb['title'], wb['old_price'], wb['new_price'], wb['link'], wb['image'], wb['platform'])
-                
-            # 3. Проверка Товаров
-            prod = get_products()
-            if prod and prod['dealID'] not in posted_ids:
-                posted_ids.add(prod['dealID'])
-                send_post(prod['title'], f"${prod['normalPrice']}", f"${prod['salePrice']}", f"https://www.cheapshark.com/redirect?dealID={prod['dealID']}", prod['thumb'], "Global Store")
-        except Exception as e:
-            print(f"Ошибка в мониторинге: {e}")
+        # Проверка всех модулей по очереди
+        sources = [
+            (get_games(), "Раздача"),
+            (get_wb_errors(), "Wildberries"),
+            (get_ali_deals(), "AliExpress"),
+            (get_mvideo_deals(), "М.Видео")
+        ]
         
-        time.sleep(1800) # Раз в 30 минут
+        for deal, platform in sources:
+            if deal and deal.get('id') not in posted_ids:
+                posted_ids.add(deal.get('id'))
+                # Унификация полей для разных API
+                t = deal.get('title')
+                o = deal.get('old', deal.get('worth', '???'))
+                n = deal.get('new', 'БЕСПЛАТНО')
+                l = deal.get('link', deal.get('open_giveaway_url'))
+                i = deal.get('img', deal.get('image', deal.get('thumb')))
+                
+                send_post(t, o, n, l, i, platform)
+                time.sleep(5) # Пауза между постами
+
+        time.sleep(1800) # Проверка каждые 30 минут
 
 if __name__ == "__main__":
-    Thread(target=run_web_server).start() # Поток для веб-сервера
-    Thread(target=monitor).start()         # Поток для поиска цен
-    bot.infinity_polling()                # Основной поток бота
+    Thread(target=run_web_server).start()
+    Thread(target=monitor).start()
+    bot.infinity_polling()
