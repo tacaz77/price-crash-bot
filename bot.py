@@ -5,8 +5,8 @@ from threading import Thread
 from flask import Flask
 
 # --- НАСТРОЙКИ (ЗАПОЛНИ СВОИМИ ДАННЫМИ) ---
-TOKEN = 'ТВОЙ_ТОКЕН_БОТА' 
-CHANNEL_ID = '@ТВОЙ_КАНАЛ'
+TOKEN = '8224578094:AAEOwXsE2aJly_LoMbS-5ud6FgT-O2rh3r8' 
+CHANNEL_ID = '@pricecrashpro_bot'
 # ------------------------------------------
 
 bot = telebot.TeleBot(TOKEN)
