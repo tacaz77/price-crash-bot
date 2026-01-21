@@ -5,18 +5,19 @@ from threading import Thread
 from flask import Flask
 import os
 
-# --- НАСТРОЙКИ ---
+# --- НАСТРОЙКИ (ЗАПОЛНИ СВОИ ДАННЫЕ) ---
 TOKEN = '8224578094:AAHRZdg6j8XWLpgqWqFeyeaFSIqeMT2vPIc' 
-CHANNEL_ID = '@pricecrashpro'
-# -----------------
+CHANNEL_ID = '@pricecrashpro' 
+# Твоя реферальная ссылка или ссылка на канал для ЛС
+REF_LINK = f"https://t.me/{CHANNEL_ID.replace('@', '')}" 
+# ---------------------------------------
 
-# threaded=False критически важен для предотвращения Conflict 409 на Render
-bot = telebot.TeleBot(TOKEN, threaded=False) 
+bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is alive"
+    return "Status: Online"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
@@ -24,18 +25,16 @@ def run_web_server():
 
 posted_ids = set()
 
-# --- ПАРСЕР WILDBERRIES ---
-def get_wb_errors():
+# --- ПАРСЕРЫ ---
+
+def get_wb():
     try:
-        # Subject 7000 — электроника. Можно менять на другие категории.
         url = "https://catalog.wb.ru/catalog/electronic/v4/filters?appType=1&curr=rub&dest=-1257786&subject=7000"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        res = requests.get(url, headers=headers, timeout=15)
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
         if res.status_code == 200:
             products = res.json().get('data', {}).get('products', [])
             for item in products:
-                # Временно поставил 10% для теста, потом верни на 90
-                if item.get('sale', 0) >= 10: 
+                if item.get('sale', 0) >= 90:
                     return {
                         'id': f"wb_{item['id']}",
                         'title': f"WB: {item['brand']} {item['name']}",
@@ -44,71 +43,81 @@ def get_wb_errors():
                         'link': f"https://www.wildberries.ru/catalog/{item['id']}/detail.aspx",
                         'img': f"https://basket-01.wb.ru/vol{item['id']//100000}/part{item['id']//1000}/{item['id']}/images/big/1.jpg"
                     }
-    except Exception as e:
-        print(f"Ошибка парсера WB: {e}")
-    return None
+    except: return None
 
-# --- ОТПРАВКА В КАНАЛ ---
+def get_games():
+    try:
+        res = requests.get("https://www.gamerpower.com/api/giveaways", timeout=10)
+        if res.status_code == 200:
+            item = res.json()[0]
+            return {
+                'id': f"game_{item['id']}",
+                'title': item['title'],
+                'old': item.get('worth', 'FREE'),
+                'new': '0 ₽ (Раздача)',
+                'link': item['open_giveaway_url'],
+                'img': item['image']
+            }
+    except: return None
+
+# --- ОТПРАВКА ---
+
 def send_post(deal, platform):
     markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(telebot.types.InlineKeyboardButton("🎁 КУПИТЬ / ЗАБРАТЬ", url=deal['link']))
+    markup.add(telebot.types.InlineKeyboardButton("🎁 ЗАБРАТЬ ПО АКЦИИ", url=deal['link']))
     caption = (
-        f"🚨 **ЦЕНА РУХНУЛА!**\n\n"
+        f"🚨 **ЦЕНА РУХНУЛА!** ({platform})\n\n"
         f"🔥 **{deal['title']}**\n"
-        f"❌ Было: {deal['old']}\n"
-        f"✅ **СТАЛО: {deal['new']}**\n\n"
-        f"🏢 Площадка: {platform}\n"
-        f"👇 Хватай быстрее!"
+        f"❌ Старая цена: {deal['old']}\n"
+        f"✅ **НОВАЯ ЦЕНА: {deal['new']}**\n\n"
+        f"📍 Ссылка в кнопке ниже!"
     )
     try:
         bot.send_photo(CHANNEL_ID, deal['img'], caption=caption, reply_markup=markup, parse_mode="Markdown")
-        print(f"Пост {deal['id']} отправлен!")
-    except Exception as e:
-        print(f"Ошибка отправки в канал: {e}")
+    except: pass
 
 # --- МОНИТОРИНГ ---
+
 def monitor():
-    print("Поток мониторинга запущен...")
-    # Тестовое сообщение при старте (удалить, когда всё заработает)
-    try:
-        bot.send_message(CHANNEL_ID, "🚀 Система мониторинга цен запущена и ищет скидки!")
-    except:
-        pass
-
+    print("Мониторинг запущен...")
     while True:
-        deal = get_wb_errors()
-        if deal and deal['id'] not in posted_ids:
-            posted_ids.add(deal['id'])
-            send_post(deal, "Wildberries")
+        # Проверяем WB
+        wb_deal = get_wb()
+        if wb_deal and wb_deal['id'] not in posted_ids:
+            posted_ids.add(wb_deal['id'])
+            send_post(wb_deal, "Wildberries")
         
-        # Проверка раз в 10 минут (600 сек)
-        time.sleep(600)
+        # Проверяем Игры
+        game_deal = get_games()
+        if game_deal and game_deal['id'] not in posted_ids:
+            posted_ids.add(game_deal['id'])
+            send_post(game_deal, "GamerPower")
 
-# --- ОБРАБОТКА ЛС ---
+        time.sleep(900) # Проверка каждые 15 минут
+
+# --- КОМАНДЫ В ЛС ---
+
 @bot.message_handler(commands=['start'])
-def start_handler(message):
-    print(f"Команда /start от {message.chat.id}")
-    bot.reply_to(message, "Привет! Я бот канала «Цена - Копейка». Все скидки публикуются в канале!")
+def start(message):
+    markup = telebot.types.InlineKeyboardMarkup()
+    markup.add(telebot.types.InlineKeyboardButton("🔥 ПЕРЕЙТИ К СКИДКАМ", url=REF_LINK))
+    bot.reply_to(message, 
+        f"Привет! 🤖 Я ищу ошибки цен и раздачи 24/7.\n\n"
+        f"Чтобы успеть купить товары со скидкой до 90%, подпишись на наш основной канал!", 
+        reply_markup=markup)
 
 @bot.message_handler(func=lambda message: True)
-def all_messages(message):
-    bot.reply_to(message, "Я работаю только в автоматическом режиме.")
+def echo(message):
+    bot.reply_to(message, "Все актуальные скидки публикуются только в канале! Нажми /start для ссылки.")
 
 # --- ЗАПУСК ---
+
 if __name__ == "__main__":
-    # Запускаем Flask для Render
     Thread(target=run_web_server, daemon=True).start()
-    
-    # Запускаем мониторинг скидок
     Thread(target=monitor, daemon=True).start()
     
-    # Очистка и запуск Polling
-    print("Удаление вебхуков и запуск...")
     bot.remove_webhook()
     time.sleep(1)
     
-    try:
-        bot.infinity_polling(timeout=20, long_polling_timeout=10)
-    except Exception as e:
-        print(f"Критическая ошибка Polling: {e}")
-        time.sleep(5)
+    print("Бот запущен...")
+    bot.infinity_polling(timeout=20, long_polling_timeout=10)
